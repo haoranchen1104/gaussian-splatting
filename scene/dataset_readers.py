@@ -254,7 +254,114 @@ def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
                            ply_path=ply_path)
     return scene_info
 
+def depth_file_to_pcd(depth_file, focal):
+    depth_img = np.asarray(Image.open(depth_file))
+    depth_img = depth_img / 1000
+    height, width = depth_img.shape
+    npyImageplaneX = np.linspace((-0.5 * width) + 0.5, (0.5 * width) - 0.5, width).reshape(1, width).repeat(height, 0).astype(np.float32)[:, :, None]
+    npyImageplaneY = np.linspace((-0.5 * height) + 0.5, (0.5 * height) - 0.5, height).reshape(height, 1).repeat(width, 1).astype(np.float32)[:, :, None]
+    npyImageplaneZ = np.full([height, width, 1], focal, np.float32)
+    npyImageplane = np.concatenate([npyImageplaneX, npyImageplaneY, npyImageplaneZ], 2)
+    depths = np.stack([depth_img, depth_img, depth_img], axis=-1)
+    pcd = npyImageplane / focal * depths
+    pcd = pcd.reshape(-1, 3)
+    pcd = pcd[np.logical_and(pcd[:, 2]>0.1, pcd[:, 2]<20), :]
+    return pcd
+
+def readCamerasFromAutolabelDataset(path, num_pts=100_000):
+    intrinsics_path = os.path.join(path, 'intrinsics.txt')
+    camera_matrix = np.loadtxt(intrinsics_path)
+    focal_length = camera_matrix[0, 0]
+
+    rgb_path = os.path.join(path, 'rgb')
+    depth_path = os.path.join(path, 'depth')
+    pose_path = os.path.join(path, 'pose')
+
+    rgb_files = os.listdir(rgb_path)
+    rgb_files = sorted(rgb_files, key=lambda x: int(x.split('.')[0]))
+
+    depth_files = os.listdir(depth_path)
+    depth_files = sorted(depth_files, key=lambda x: int(x.split('.')[0]))
+
+    pose_files = os.listdir(pose_path)
+    pose_files = sorted([p for p in pose_files if p[0] != '.'],
+                        key=lambda p: int(p.split('.')[0]))
+
+    cam_infos = []
+    pcds = []
+    num_pts_per_file = int(num_pts / len(depth_files))
+
+    for idx, (rgb_file, depth_file, pose_file) in enumerate(zip(
+        rgb_files, depth_files, pose_files)):
+
+        T_CW = np.loadtxt(os.path.join(pose_path, pose_file))
+        R = np.transpose(T_CW[:3,:3])  # R is stored transposed due to 'glm' in CUDA code
+        T = T_CW[:3, 3]
+
+        image_path = os.path.join(path, 'rgb', rgb_file)
+        image_name = Path(rgb_file).stem
+        image = Image.open(image_path)
+
+        FovX = focal2fov(focal_length, image.size[0])
+        FovY = focal2fov(focal_length, image.size[1])
+
+        cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+            image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1]))
+        
+        T_WC = np.linalg.inv(T_CW)
+        depth_path = os.path.join(path, 'depth', depth_file)
+        pcd = depth_file_to_pcd(depth_path, focal_length)
+        indices = np.random.choice(pcd.shape[0], size=(num_pts_per_file, ))
+        pcd = pcd[indices, :]
+        pcd_h = np.transpose(np.hstack((pcd, np.ones((pcd.shape[0], 1)))))
+        w_pcd_h = T_WC @ pcd_h
+        w_pcd = np.transpose(w_pcd_h[:3, :])
+        pcds.append(w_pcd)
+    
+    pcd = np.vstack(pcds)
+    return cam_infos, pcd
+
+
+def readAutolabelDatasetInfo(path, use_depth=True):
+    print("Reading Scene Transforms")
+    train_cam_infos, train_pcd = readCamerasFromAutolabelDataset(path)
+    test_cam_infos = []
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+    ply_path = os.path.join(path, "points3d.ply")
+    if not os.path.exists(ply_path):
+        # Since this data set has no colmap data, we start with random points
+        num_pts = 100_000
+        if use_depth:
+            print(f"Use point cloud extracted from depth images ({train_pcd.shape[0]})...")
+            xyz = train_pcd
+            shs = np.random.random((train_pcd.shape[0], 3)) / 255.0
+            pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((train_pcd.shape[0], 3)))
+        else:
+            print(f"Generating random point cloud ({num_pts})...")
+            # We create random points inside the bounds of scenes
+            xyz = np.random.random((num_pts, 3)) * nerf_normalization['radius'] - nerf_normalization['radius'] / 2
+            shs = np.random.random((num_pts, 3)) / 255.0
+            pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3)))
+
+        storePly(ply_path, xyz, SH2RGB(shs) * 255)
+    try:
+        pcd = fetchPly(ply_path)
+    except:
+        pcd = None
+
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=ply_path)
+    return scene_info
+    
+
+
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
-    "Blender" : readNerfSyntheticInfo
+    "Blender" : readNerfSyntheticInfo,
+    "Autolabel": readAutolabelDatasetInfo
 }
