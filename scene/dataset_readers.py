@@ -268,7 +268,7 @@ def depth_file_to_pcd(depth_file, focal):
     pcd = pcd[np.logical_and(pcd[:, 2]>0.1, pcd[:, 2]<20), :]
     return pcd
 
-def readCamerasFromAutolabelDataset(path, num_pts=100_000):
+def readCamerasFromAutolabelDataset(path, num_pts=100_000, use_depth=False):
     intrinsics_path = os.path.join(path, 'intrinsics.txt')
     camera_matrix = np.loadtxt(intrinsics_path)
     focal_length = camera_matrix[0, 0]
@@ -290,6 +290,7 @@ def readCamerasFromAutolabelDataset(path, num_pts=100_000):
     cam_infos = []
     pcds = []
     num_pts_per_file = int(num_pts / len(depth_files))
+    ply_path = os.path.join(path, "points3d.ply")
 
     for idx, (rgb_file, depth_file, pose_file) in enumerate(zip(
         rgb_files, depth_files, pose_files)):
@@ -308,23 +309,25 @@ def readCamerasFromAutolabelDataset(path, num_pts=100_000):
         cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
             image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1]))
         
-        T_WC = np.linalg.inv(T_CW)
-        depth_path = os.path.join(path, 'depth', depth_file)
-        pcd = depth_file_to_pcd(depth_path, focal_length)
-        indices = np.random.choice(pcd.shape[0], size=(num_pts_per_file, ))
-        pcd = pcd[indices, :]
-        pcd_h = np.transpose(np.hstack((pcd, np.ones((pcd.shape[0], 1)))))
-        w_pcd_h = T_WC @ pcd_h
-        w_pcd = np.transpose(w_pcd_h[:3, :])
-        pcds.append(w_pcd)
+        if use_depth and (not os.path.exists(ply_path)):
+            T_WC = np.linalg.inv(T_CW)
+            depth_path = os.path.join(path, 'depth', depth_file)
+            pcd = depth_file_to_pcd(depth_path, focal_length)
+            indices = np.random.choice(pcd.shape[0], size=(num_pts_per_file, ))
+            pcd = pcd[indices, :]
+            pcd_h = np.transpose(np.hstack((pcd, np.ones((pcd.shape[0], 1)))))
+            w_pcd_h = T_WC @ pcd_h
+            w_pcd = np.transpose(w_pcd_h[:3, :])
+            pcds.append(w_pcd)
     
-    pcd = np.vstack(pcds)
-    return cam_infos, pcd
+    if use_depth and (not os.path.exists(ply_path)):
+        pcds = np.vstack(pcds)
+    return cam_infos, pcds
 
 
 def readAutolabelDatasetInfo(path, use_depth=True):
     print("Reading Scene Transforms")
-    train_cam_infos, train_pcd = readCamerasFromAutolabelDataset(path)
+    train_cam_infos, train_pcd = readCamerasFromAutolabelDataset(path, use_depth=use_depth)
     test_cam_infos = []
 
     nerf_normalization = getNerfppNorm(train_cam_infos)

@@ -55,6 +55,7 @@ class ModelParams(ParamGroup):
         self.data_device = "cuda"
         self.eval = False
         self.dataset_type = "colmap"
+        self.use_depth = True
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
