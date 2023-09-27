@@ -62,3 +62,37 @@ def _ssim(img1, img2, window, window_size, channel, size_average=True):
     else:
         return ssim_map.mean(1).mean(1).mean(1)
 
+def contrastive_loss(rendered_feature, masks, num_anchor=32, temperature=0.1):
+    loss = 0
+    num_valid_mask = 0
+    for idx in range(len(masks)):
+        mask = masks[idx].to(rendered_feature.device)
+        if torch.sum(mask) == 0:
+            continue
+        num_valid_mask += 1
+        
+        mask_idxs = torch.argwhere(mask)
+        anchor_idxs = torch.randint(low=0, high=mask_idxs.shape[0], size=(num_anchor, ))
+        anchor_features = rendered_feature[:, mask_idxs[anchor_idxs, 0], mask_idxs[anchor_idxs, 1]]
+        anchor_features = anchor_features.permute(1, 0)
+        
+        pos_features = rendered_feature[:, mask_idxs[:, 0], mask_idxs[:, 1]]
+        pos_features = torch.mean(pos_features, dim=1).detach()
+        
+        neg_mask_idxs = torch.argwhere(torch.logical_not(mask))
+        neg_idxs = torch.randint(low=0, high=neg_mask_idxs.shape[0], size=(num_anchor*15, ))
+        neg_features = rendered_feature[:, neg_mask_idxs[neg_idxs, 0], neg_mask_idxs[neg_idxs, 1]]
+        neg_features = neg_features.permute(1, 0)
+        neg_features = neg_features.reshape(num_anchor, 15, -1)
+        neg_features = neg_features.detach()
+
+        logits_pos = F.cosine_similarity(anchor_features, pos_features[None, :], dim=-1)
+        logits_neg = F.cosine_similarity(anchor_features[:, None, :], neg_features, dim=-1)
+        logits = torch.cat((logits_pos[:, None], logits_neg), dim=1)
+
+        labels = torch.zeros(anchor_features.shape[0], dtype=torch.int64).to(rendered_feature.device)
+        loss += F.cross_entropy(logits/temperature, labels)
+    
+    loss /= num_valid_mask
+    return loss
+

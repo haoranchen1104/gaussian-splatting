@@ -131,3 +131,34 @@ def safe_state(silent):
     np.random.seed(0)
     torch.manual_seed(0)
     torch.cuda.set_device(torch.device("cuda:0"))
+
+def pca_feature2image(feature, v=None):
+    """Perform PCA on feature, and return 
+
+    Args:
+        feature (torch.tensor): a tensor of shape (FEATURE_DIM, H, W)
+        v (torch.tensor): a tensor of shape (FEATURE_DIM, 3)
+    Return:
+        image (torch.tensor): a tensor of shape (3, H, W)
+    """
+    feature_dim, h, w = feature.shape
+    feature = feature.permute(1, 2, 0).reshape(-1, feature_dim)
+
+    if v is None:
+        _, _, v = torch.pca_lowrank(feature, q=3)
+    image = torch.matmul(feature, v)
+    image = image.permute(1, 0).reshape(3, h, w)
+    return image
+
+def get_pca_transform_matrix(feature, q=3):
+    """
+    Args:
+        feature (torch.tensor): a tensor of shape (N, FEATURE_DIM)
+        q (int, optional): number of principle components. Defaults to 3.
+
+    Returns:
+        v (torch.tensor): a tensor of shape (FEATURE_DIM, q)
+    """
+    _, _, v = torch.pca_lowrank(feature, q=q)
+    return v
+

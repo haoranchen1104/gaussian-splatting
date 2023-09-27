@@ -13,6 +13,7 @@ from scene.cameras import Camera
 import numpy as np
 from utils.general_utils import PILtoTorch
 from utils.graphics_utils import fov2focal
+from utils.image_utils import load_sam_mask
 
 WARNED = False
 
@@ -39,6 +40,10 @@ def loadCam(args, id, cam_info, resolution_scale):
         resolution = (int(orig_w / scale), int(orig_h / scale))
 
     resized_image_rgb = PILtoTorch(cam_info.image, resolution)
+    if cam_info.sam_mask_path:
+        sam_mask_encoded = load_sam_mask(cam_info.sam_mask_path, resolution)
+    else:
+        sam_mask_encoded = None
 
     gt_image = resized_image_rgb[:3, ...]
     loaded_mask = None
@@ -49,7 +54,8 @@ def loadCam(args, id, cam_info, resolution_scale):
     return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
                   image=gt_image, gt_alpha_mask=loaded_mask,
-                  image_name=cam_info.image_name, uid=id, data_device=args.data_device)
+                  image_name=cam_info.image_name, uid=id,
+                  sam_mask_encoded=sam_mask_encoded, data_device=args.data_device)
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):
     camera_list = []

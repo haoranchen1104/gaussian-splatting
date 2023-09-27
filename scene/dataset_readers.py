@@ -32,6 +32,7 @@ class CameraInfo(NamedTuple):
     image: np.array
     image_path: str
     image_name: str
+    sam_mask_path: str
     width: int
     height: int
 
@@ -276,6 +277,7 @@ def readCamerasFromAutolabelDataset(path, num_pts=100_000, use_depth=False):
     rgb_path = os.path.join(path, 'rgb')
     depth_path = os.path.join(path, 'depth')
     pose_path = os.path.join(path, 'pose')
+    sam_mask_path = os.path.join(path, 'sam_mask')
 
     rgb_files = os.listdir(rgb_path)
     rgb_files = sorted(rgb_files, key=lambda x: int(x.split('.')[0]))
@@ -284,16 +286,18 @@ def readCamerasFromAutolabelDataset(path, num_pts=100_000, use_depth=False):
     depth_files = sorted(depth_files, key=lambda x: int(x.split('.')[0]))
 
     pose_files = os.listdir(pose_path)
-    pose_files = sorted([p for p in pose_files if p[0] != '.'],
-                        key=lambda p: int(p.split('.')[0]))
+    pose_files = sorted(pose_files, key=lambda p: int(p.split('.')[0]))
+
+    sam_mask_files = os.listdir(sam_mask_path)
+    sam_mask_files = sorted(sam_mask_files, key=lambda p: int(p.split('.')[0]))
 
     cam_infos = []
     pcds = []
     num_pts_per_file = int(num_pts / len(depth_files))
     ply_path = os.path.join(path, "points3d.ply")
 
-    for idx, (rgb_file, depth_file, pose_file) in enumerate(zip(
-        rgb_files, depth_files, pose_files)):
+    for idx, (rgb_file, depth_file, pose_file, sam_mask_file) in enumerate(zip(
+        rgb_files, depth_files, pose_files, sam_mask_files)):
 
         T_CW = np.loadtxt(os.path.join(pose_path, pose_file))
         R = np.transpose(T_CW[:3,:3])  # R is stored transposed due to 'glm' in CUDA code
@@ -303,11 +307,13 @@ def readCamerasFromAutolabelDataset(path, num_pts=100_000, use_depth=False):
         image_name = Path(rgb_file).stem
         image = Image.open(image_path)
 
+        sam_mask_path = os.path.join(path, 'sam_mask', sam_mask_file)
+
         FovX = focal2fov(focal_length, image.size[0])
         FovY = focal2fov(focal_length, image.size[1])
 
         cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
-            image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1]))
+            image_path=image_path, image_name=image_name, sam_mask_path=sam_mask_path, width=image.size[0], height=image.size[1]))
         
         if use_depth and (not os.path.exists(ply_path)):
             T_WC = np.linalg.inv(T_CW)
