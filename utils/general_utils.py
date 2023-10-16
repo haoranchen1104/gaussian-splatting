@@ -14,6 +14,14 @@ import sys
 from datetime import datetime
 import numpy as np
 import random
+import torch.nn.functional as F
+from matplotlib import cm
+
+colors0 = (cm.tab10(np.linspace(0, 1, 10)) * 255.0)[:, :3].astype(np.uint8)
+colors1 = (cm.Accent(np.linspace(0, 1, 8)) * 255.0)[:, :3].astype(np.uint8)
+colors2 = (cm.Set1(np.linspace(0, 1, 9)) * 255.0)[:, :3].astype(np.uint8)
+colors3 = (cm.tab20b(np.linspace(0, 1, 20)) * 255.0)[:, :3].astype(np.uint8)
+COLORS = torch.tensor(np.concatenate([colors0, colors1, colors2, colors3], axis=0), device='cuda')
 
 def inverse_sigmoid(x):
     return torch.log(x/(1-x))
@@ -162,3 +170,19 @@ def get_pca_transform_matrix(feature, q=3):
     _, _, v = torch.pca_lowrank(feature, q=q)
     return v
 
+def get_similarity_labels(feature, reference_features):
+    """Get labels according to feature similarity
+
+    Args:
+        feature (torch.tensor): a tensor of shape (FEATURE_DIM, H, W)
+        reference_features (torch.tensor): (N, FEATURE_DIM)
+
+    Returns:
+        similarity_labels (torch.tensor): (H, W) ranging from [0, N)
+    """
+    feature_dim, h, w = feature.shape
+    feature = feature.permute(1, 2, 0).reshape(-1, feature_dim)
+    sim_mat = F.cosine_similarity(feature[:, None, :], reference_features[None, :, :], dim=-1)
+    similarity_labels = torch.argmax(sim_mat, dim=1)
+    similarity_labels = similarity_labels.reshape(h, w)
+    return similarity_labels

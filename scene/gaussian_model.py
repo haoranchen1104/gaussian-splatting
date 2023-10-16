@@ -20,6 +20,7 @@ from utils.sh_utils import RGB2SH
 from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
+import hdbscan
 
 FEATURE_DIM = 8
 
@@ -434,3 +435,21 @@ class GaussianModel:
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
         self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
         self.denom[update_filter] += 1
+
+    def compute_instance_centers(self):
+        print("Performing HDBSCAN on Gaussians' instance features ...")
+        instance_features = self.get_instance_feature
+        instance_features = instance_features.cpu().numpy()
+        print("Feature shape: ", instance_features.shape)
+        
+        clust = hdbscan.HDBSCAN(min_cluster_size=100, gen_min_span_tree=True)
+        sample_indices = np.random.permutation(instance_features.shape[0])[:200000]
+        clust.fit(instance_features[sample_indices, :])
+
+        exemplar = [np.mean(exemplars, axis=0) for exemplars in clust.exemplars_]
+        exemplar = np.vstack(exemplar)
+        print(f"Total {len(clust.exemplars_)} instance centers.")
+
+        self.instance_centers = torch.tensor(exemplar, dtype=torch.float, device='cuda')
+        return self.instance_centers
+        
